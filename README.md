@@ -12,6 +12,7 @@ The VPS is used only for WebSocket signaling and STUN/TURN discovery. Audio, vid
 - Lets either video tile be clicked to swap the main and picture-in-picture view.
 - Supports microphone mute/unmute and camera on/off.
 - Supports screen sharing with a visible sharing banner and a Stop sharing button.
+- Plays short incoming notifications for screen sharing, chat messages, and file transfers.
 - Supports camera, microphone, and speaker selection.
 - Shows WebRTC connection state and call quality details.
 - Detects direct P2P versus TURN relay when WebRTC stats expose that route.
@@ -22,6 +23,8 @@ The VPS is used only for WebSocket signaling and STUN/TURN discovery. Audio, vid
 - Sends files peer-to-peer over a WebRTC data channel.
 - Queues multiple selected or dropped files and sends them one after another.
 - Verifies file transfers with SHA-256 before marking a received file as saved.
+- Lets the receiver open the saved file in Finder or Explorer from the file message.
+- Includes an in-call Ping-Pong mini game over the WebRTC data channel.
 - Requires the user to choose a local save folder before joining or creating rooms.
 - Lets either peer clear local chat and transfer history for both connected participants.
 
@@ -47,6 +50,7 @@ Rooms are in-memory and limited to two participants. The signaling server forwar
 - Creates `RTCPeerConnection` instances with STUN/TURN configuration from the server.
 - Exchanges offers, answers, and ICE candidates through WebSocket signaling.
 - Sends chat and files over WebRTC data channels.
+- Sends in-call game state over the existing WebRTC data channel.
 - Writes incoming files through the Electron main process so native file paths stay out of the renderer.
 - Stores the selected save folder in local app settings.
 

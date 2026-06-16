@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld("kaplia", {
     startReceive: (payload) => ipcRenderer.invoke("files:startReceive", payload),
     writeReceiveChunk: (payload) => ipcRenderer.invoke("files:writeReceiveChunk", payload),
     finishReceive: (payload) => ipcRenderer.invoke("files:finishReceive", payload),
-    cancelReceive: (payload) => ipcRenderer.invoke("files:cancelReceive", payload)
+    cancelReceive: (payload) => ipcRenderer.invoke("files:cancelReceive", payload),
+    showItemInFolder: (payload) => ipcRenderer.invoke("files:showItemInFolder", payload)
   }
 });

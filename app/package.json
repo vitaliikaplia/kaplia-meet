@@ -1,6 +1,6 @@
 {
   "name": "kaplia-meet-app",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Minimal Electron WebRTC P2P video calling app",
   "main": "electron/main.js",
   "private": true,

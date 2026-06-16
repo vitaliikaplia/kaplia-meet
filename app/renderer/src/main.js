@@ -49,6 +49,21 @@ const safetyCode = document.querySelector("#safety-code");
 const screenPicker = document.querySelector("#screen-picker");
 const screenSourceList = document.querySelector("#screen-source-list");
 const cancelScreenPickerButton = document.querySelector("#cancel-screen-picker-button");
+const startGameButton = document.querySelector("#start-game-button");
+const gameLayer = document.querySelector("#game-layer");
+const gameInvite = document.querySelector("#game-invite");
+const confirmGameButton = document.querySelector("#confirm-game-button");
+const declineGameButton = document.querySelector("#decline-game-button");
+const gameLeftScore = document.querySelector("#game-left-score");
+const gameRightScore = document.querySelector("#game-right-score");
+const gameStatus = document.querySelector("#game-status");
+const gameLeftPaddle = document.querySelector("#game-left-paddle");
+const gameRightPaddle = document.querySelector("#game-right-paddle");
+const gameBall = document.querySelector("#game-ball");
+const gameResult = document.querySelector("#game-result");
+const gameResultTitle = document.querySelector("#game-result-title");
+const gamePlayAgainButton = document.querySelector("#game-play-again-button");
+const gameEndButton = document.querySelector("#game-end-button");
 const leaveButton = document.querySelector("#leave-button");
 const roomError = document.querySelector("#room-error");
 const clearChatButton = document.querySelector("#clear-chat-button");
@@ -69,6 +84,11 @@ const FILE_BUFFER_LIMIT = 1024 * 1024;
 const FILE_BUFFER_LOW_THRESHOLD = 512 * 1024;
 const CHAT_MAX_CHARS = 8000;
 const QUALITY_POLL_INTERVAL_MS = 2000;
+const GAME_SCORE_LIMIT = 5;
+const GAME_PADDLE_HEIGHT = 0.24;
+const GAME_PADDLE_SPEED = 0.86;
+const GAME_BALL_SIZE = 0.026;
+const GAME_STATE_INTERVAL_MS = 33;
 
 let config = null;
 let socket = null;
@@ -107,6 +127,33 @@ let selectedSpeakerId = localStorage.getItem("kaplia-speaker-id") || "";
 let screenStream = null;
 let isScreenSharing = false;
 let isPeerScreenSharing = false;
+let audioContext = null;
+let pendingGameInvite = false;
+let gameInvitePending = false;
+let gameInviteTimeout = 0;
+let gameAnimationFrame = 0;
+let gameState = {
+  active: false,
+  role: "idle",
+  roundOver: false,
+  lastFrameAt: 0,
+  lastBroadcastAt: 0,
+  localInput: 0,
+  remoteInput: 0,
+  leftY: 0.5,
+  rightY: 0.5,
+  ballX: 0.5,
+  ballY: 0.5,
+  ballVX: 0.56,
+  ballVY: 0.28,
+  leftScore: 0,
+  rightScore: 0,
+  winner: ""
+};
+const gameKeys = {
+  up: false,
+  down: false
+};
 
 function normalizeRoomId(value) {
   return value.trim().toUpperCase().replace(/\s+/g, "-");
@@ -249,6 +296,7 @@ function setChatControlsState() {
   sendChatButton.disabled = !channelOpen || !hasDraft;
   chatInput.disabled = !channelOpen;
   clearChatButton.disabled = chatMessages.childElementCount === 0;
+  setGameControlsState();
 }
 
 function updateChatInputHeight() {
@@ -264,6 +312,77 @@ function scrollChatToBottom() {
 
 function notifyChatActivity() {
   window.requestAnimationFrame(scrollChatToBottom);
+}
+
+function getAudioContext() {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+
+  if (!AudioContext) {
+    return null;
+  }
+
+  if (!audioContext) {
+    audioContext = new AudioContext();
+  }
+
+  if (audioContext.state === "suspended") {
+    audioContext.resume().catch(() => {});
+  }
+
+  return audioContext;
+}
+
+function primeNotificationAudio() {
+  getAudioContext();
+}
+
+function playNotificationSound(type = "message") {
+  const context = getAudioContext();
+
+  if (!context) {
+    return;
+  }
+
+  const presets = {
+    message: {
+      notes: [740, 980],
+      duration: 0.08,
+      gap: 0.025,
+      gain: 0.035
+    },
+    file: {
+      notes: [560, 740],
+      duration: 0.095,
+      gap: 0.025,
+      gain: 0.038
+    },
+    screen: {
+      notes: [660, 880, 1175],
+      duration: 0.075,
+      gap: 0.018,
+      gain: 0.034
+    }
+  };
+  const preset = presets[type] || presets.message;
+  const startAt = context.currentTime + 0.012;
+
+  preset.notes.forEach((frequency, index) => {
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    const noteStart = startAt + index * (preset.duration + preset.gap);
+    const noteEnd = noteStart + preset.duration;
+
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(frequency, noteStart);
+    gain.gain.setValueAtTime(0.0001, noteStart);
+    gain.gain.exponentialRampToValueAtTime(preset.gain, noteStart + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, noteEnd);
+
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start(noteStart);
+    oscillator.stop(noteEnd + 0.02);
+  });
 }
 
 function normalizePipCorner(corner) {
@@ -308,6 +427,10 @@ function getNearestPipCorner(pointerX, pointerY) {
 }
 
 function startPipDrag(event) {
+  if (gameState.active) {
+    return;
+  }
+
   if (event.button !== 0) {
     return;
   }
@@ -470,6 +593,7 @@ function addChatMessage(direction, text, options = {}) {
 
 function createTransferItem(id, direction, fileName, size) {
   const isOutgoing = direction === "Sending" || direction === "Queued";
+  const isIncoming = direction === "Receiving";
   const shell = createChatShell(isOutgoing ? "outgoing" : "incoming", {
     kind: "file-message",
     notify: !isOutgoing
@@ -488,13 +612,34 @@ function createTransferItem(id, direction, fileName, size) {
   status.className = "file-transfer-status";
   status.textContent = `0% of ${formatBytes(size)}`;
 
+  const actions = document.createElement("div");
+  actions.className = "file-transfer-actions";
+  let openFolderButton = null;
+
+  if (isIncoming) {
+    openFolderButton = document.createElement("button");
+    openFolderButton.className = "file-transfer-action";
+    openFolderButton.type = "button";
+    openFolderButton.disabled = true;
+    openFolderButton.title = "Open containing folder";
+    openFolderButton.setAttribute("aria-label", "Open containing folder");
+    openFolderButton.innerHTML = `
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5V17a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3Z" />
+        <path d="M9 13h6" />
+        <path d="m13 11 2 2-2 2" />
+      </svg>
+    `;
+    actions.append(openFolderButton);
+  }
+
   const track = document.createElement("div");
   track.className = "file-progress-track";
 
   const bar = document.createElement("div");
   bar.className = "file-progress-bar";
 
-  topline.append(name, status);
+  topline.append(name, status, actions);
   track.append(bar);
   item.append(topline, track);
   shell.body.append(item);
@@ -503,8 +648,18 @@ function createTransferItem(id, direction, fileName, size) {
     item: shell.message,
     status,
     bar,
-    size
+    size,
+    filePath: "",
+    openFolderButton
   };
+
+  if (openFolderButton) {
+    openFolderButton.addEventListener("click", () => {
+      openTransferFileLocation(id).catch((error) => {
+        setRoomError(error.message || "Could not open received file location.");
+      });
+    });
+  }
 
   transferItems.set(id, entry);
   setFileControlsState();
@@ -527,6 +682,36 @@ function updateTransferItem(id, received, statusText) {
 function clearTransferItems() {
   transferItems.clear();
   setFileControlsState();
+}
+
+function setTransferFileLocation(id, filePath) {
+  const entry = transferItems.get(id);
+
+  if (!entry) {
+    return;
+  }
+
+  entry.filePath = filePath;
+
+  if (entry.openFolderButton) {
+    entry.openFolderButton.disabled = !filePath;
+  }
+}
+
+async function openTransferFileLocation(id) {
+  const entry = transferItems.get(id);
+
+  if (!entry?.filePath) {
+    throw new Error("The received file is not saved yet.");
+  }
+
+  if (!fileBridge?.showItemInFolder) {
+    throw new Error("Opening the save folder is unavailable in this runtime.");
+  }
+
+  await fileBridge.showItemInFolder({
+    filePath: entry.filePath
+  });
 }
 
 function clearChatHistory(options = {}) {
@@ -1229,6 +1414,10 @@ function closeFileDataChannel() {
 }
 
 function closeChatDataChannel() {
+  endGame({
+    notifyPeer: false
+  });
+
   if (chatDataChannel) {
     chatDataChannel.close();
   }
@@ -1304,6 +1493,9 @@ function setupChatDataChannel(channel) {
 
   chatDataChannel.addEventListener("close", () => {
     if (chatDataChannel === channel) {
+      endGame({
+        notifyPeer: false
+      });
       chatDataChannel = null;
       setChatControlsState();
     }
@@ -1353,6 +1545,7 @@ async function handleChatChannelMessage(event) {
     const text = String(message.text || "");
     if (text) {
       addChatMessage("incoming", text);
+      playNotificationSound("message");
     }
     return;
   }
@@ -1363,10 +1556,18 @@ async function handleChatChannelMessage(event) {
   }
 
   if (message.kind === "screen-share-status") {
+    const wasPeerScreenSharing = isPeerScreenSharing;
     isPeerScreenSharing = Boolean(message.active);
+    if (isPeerScreenSharing && !wasPeerScreenSharing) {
+      playNotificationSound("screen");
+    }
     updateScreenShareUi();
     setRoomError(isPeerScreenSharing ? "Peer is sharing their screen." : "");
     return;
+  }
+
+  if (typeof message.kind === "string" && message.kind.startsWith("game-")) {
+    handleGameMessage(message);
   }
 }
 
@@ -1394,6 +1595,464 @@ function sendChatMessage() {
   chatInput.value = "";
   updateChatInputHeight();
   setChatControlsState();
+}
+
+function setGameControlsState() {
+  if (gameState.active) {
+    startGameButton.textContent = "End Game";
+    startGameButton.disabled = false;
+    return;
+  }
+
+  if (gameInvitePending) {
+    startGameButton.textContent = "Game invited";
+    startGameButton.disabled = true;
+    return;
+  }
+
+  startGameButton.textContent = "Start Game";
+  startGameButton.disabled = chatDataChannel?.readyState !== "open";
+}
+
+function hideGameInvite() {
+  pendingGameInvite = false;
+  gameInvite.classList.add("hidden");
+}
+
+function sendGameMessage(message) {
+  sendChatControlMessage({
+    ...message,
+    sentAt: Date.now()
+  });
+}
+
+function safeSendGameMessage(message) {
+  try {
+    sendGameMessage(message);
+  } catch (error) {
+    setRoomError(error.message || "Could not send game event.");
+  }
+}
+
+function clearGameInviteTimeout() {
+  window.clearTimeout(gameInviteTimeout);
+  gameInviteTimeout = 0;
+}
+
+function sendGameInvite() {
+  if (chatDataChannel?.readyState !== "open") {
+    setRoomError("Start Game is available after the peer connects.");
+    return;
+  }
+
+  gameInvitePending = true;
+  clearGameInviteTimeout();
+  sendGameMessage({
+    kind: "game-invite",
+    id: crypto.randomUUID()
+  });
+  setRoomError("Game invite sent.");
+  setGameControlsState();
+
+  gameInviteTimeout = window.setTimeout(() => {
+    if (!gameInvitePending) {
+      return;
+    }
+
+    gameInvitePending = false;
+    setRoomError("Game invite expired.");
+    setGameControlsState();
+  }, 20000);
+}
+
+function getLocalPlayerSide() {
+  return gameState.role === "guest" ? "right" : "left";
+}
+
+function resetGameBall(direction = Math.random() > 0.5 ? 1 : -1) {
+  gameState.ballX = 0.5;
+  gameState.ballY = 0.5;
+  gameState.ballVX = direction * 0.56;
+  gameState.ballVY = (Math.random() > 0.5 ? 1 : -1) * (0.2 + Math.random() * 0.18);
+}
+
+function resetGameMatch() {
+  gameState.roundOver = false;
+  gameState.leftY = 0.5;
+  gameState.rightY = 0.5;
+  gameState.leftScore = 0;
+  gameState.rightScore = 0;
+  gameState.winner = "";
+  resetGameBall();
+}
+
+function packGameState() {
+  return {
+    roundOver: gameState.roundOver,
+    leftY: gameState.leftY,
+    rightY: gameState.rightY,
+    ballX: gameState.ballX,
+    ballY: gameState.ballY,
+    leftScore: gameState.leftScore,
+    rightScore: gameState.rightScore,
+    winner: gameState.winner
+  };
+}
+
+function applyGameSnapshot(snapshot = {}) {
+  gameState.roundOver = Boolean(snapshot.roundOver);
+  gameState.leftY = clamp(Number(snapshot.leftY ?? gameState.leftY), 0, 1);
+  gameState.rightY = clamp(Number(snapshot.rightY ?? gameState.rightY), 0, 1);
+  gameState.ballX = clamp(Number(snapshot.ballX ?? gameState.ballX), -0.1, 1.1);
+  gameState.ballY = clamp(Number(snapshot.ballY ?? gameState.ballY), -0.1, 1.1);
+  gameState.leftScore = clamp(Number(snapshot.leftScore ?? gameState.leftScore), 0, 99);
+  gameState.rightScore = clamp(Number(snapshot.rightScore ?? gameState.rightScore), 0, 99);
+  gameState.winner = snapshot.winner === "left" || snapshot.winner === "right" ? snapshot.winner : "";
+  renderGameState();
+}
+
+function renderGameState() {
+  gameLeftScore.textContent = String(gameState.leftScore);
+  gameRightScore.textContent = String(gameState.rightScore);
+  gameLeftPaddle.style.top = `${gameState.leftY * 100}%`;
+  gameRightPaddle.style.top = `${gameState.rightY * 100}%`;
+  gameBall.style.left = `${gameState.ballX * 100}%`;
+  gameBall.style.top = `${gameState.ballY * 100}%`;
+
+  if (gameState.roundOver) {
+    const localWon = gameState.winner && gameState.winner === getLocalPlayerSide();
+    gameStatus.textContent = "Game over";
+    gameResultTitle.textContent = localWon ? "You won" : "Peer won";
+    gameResult.classList.remove("hidden");
+    return;
+  }
+
+  gameResult.classList.add("hidden");
+  gameStatus.textContent = gameState.role === "guest" ? "You are right" : "You are left";
+}
+
+function enterGameLayout(role) {
+  videoGrid.classList.add("game-active");
+  videoGrid.classList.toggle("game-guest", role === "guest");
+  gameLayer.classList.remove("hidden");
+  hideGameInvite();
+}
+
+function startGame(role, options = {}) {
+  clearGameInviteTimeout();
+  gameInvitePending = false;
+  gameState.active = true;
+  gameState.role = role;
+  gameState.localInput = 0;
+  gameState.remoteInput = 0;
+  gameKeys.up = false;
+  gameKeys.down = false;
+  enterGameLayout(role);
+
+  if (options.reset !== false) {
+    resetGameMatch();
+  }
+
+  setRoomError("Ping-Pong started. Use Arrow Up and Arrow Down.");
+  setGameControlsState();
+  renderGameState();
+
+  if (role === "host") {
+    startHostGameLoop();
+  }
+}
+
+function scoreGamePoint(side) {
+  if (side === "left") {
+    gameState.leftScore += 1;
+  } else {
+    gameState.rightScore += 1;
+  }
+
+  if (gameState.leftScore >= GAME_SCORE_LIMIT || gameState.rightScore >= GAME_SCORE_LIMIT) {
+    gameState.roundOver = true;
+    gameState.winner = gameState.leftScore > gameState.rightScore ? "left" : "right";
+    return;
+  }
+
+  resetGameBall(side === "left" ? 1 : -1);
+}
+
+function bounceGameBall(direction, offset) {
+  const currentSpeed = Math.hypot(gameState.ballVX, gameState.ballVY);
+  const speed = Math.min(currentSpeed + 0.035, 0.96);
+  const angle = clamp(offset / (GAME_PADDLE_HEIGHT / 2), -1, 1) * 0.78;
+
+  gameState.ballVX = direction * speed * Math.cos(angle);
+  gameState.ballVY = speed * Math.sin(angle);
+}
+
+function updateHostGame(dt) {
+  const paddleHalf = GAME_PADDLE_HEIGHT / 2;
+  gameState.leftY = clamp(gameState.leftY + gameState.localInput * GAME_PADDLE_SPEED * dt, paddleHalf, 1 - paddleHalf);
+  gameState.rightY = clamp(gameState.rightY + gameState.remoteInput * GAME_PADDLE_SPEED * dt, paddleHalf, 1 - paddleHalf);
+
+  if (gameState.roundOver) {
+    return;
+  }
+
+  gameState.ballX += gameState.ballVX * dt;
+  gameState.ballY += gameState.ballVY * dt;
+
+  if (gameState.ballY <= GAME_BALL_SIZE / 2 && gameState.ballVY < 0) {
+    gameState.ballY = GAME_BALL_SIZE / 2;
+    gameState.ballVY *= -1;
+  }
+
+  if (gameState.ballY >= 1 - GAME_BALL_SIZE / 2 && gameState.ballVY > 0) {
+    gameState.ballY = 1 - GAME_BALL_SIZE / 2;
+    gameState.ballVY *= -1;
+  }
+
+  const hitRange = paddleHalf + GAME_BALL_SIZE;
+
+  if (gameState.ballVX < 0 && gameState.ballX <= 0.055 && Math.abs(gameState.ballY - gameState.leftY) <= hitRange) {
+    gameState.ballX = 0.055;
+    bounceGameBall(1, gameState.ballY - gameState.leftY);
+  }
+
+  if (gameState.ballVX > 0 && gameState.ballX >= 0.945 && Math.abs(gameState.ballY - gameState.rightY) <= hitRange) {
+    gameState.ballX = 0.945;
+    bounceGameBall(-1, gameState.ballY - gameState.rightY);
+  }
+
+  if (gameState.ballX < -0.02) {
+    scoreGamePoint("right");
+  }
+
+  if (gameState.ballX > 1.02) {
+    scoreGamePoint("left");
+  }
+}
+
+function broadcastGameState() {
+  if (chatDataChannel?.readyState !== "open") {
+    return;
+  }
+
+  safeSendGameMessage({
+    kind: "game-state",
+    state: packGameState()
+  });
+}
+
+function startHostGameLoop() {
+  window.cancelAnimationFrame(gameAnimationFrame);
+  gameState.lastFrameAt = performance.now();
+  gameState.lastBroadcastAt = 0;
+
+  const tick = (timestamp) => {
+    if (!gameState.active || gameState.role !== "host") {
+      return;
+    }
+
+    const dt = Math.min(Math.max((timestamp - gameState.lastFrameAt) / 1000, 0), 0.05);
+    gameState.lastFrameAt = timestamp;
+    updateHostGame(dt);
+    renderGameState();
+
+    if (timestamp - gameState.lastBroadcastAt >= GAME_STATE_INTERVAL_MS) {
+      gameState.lastBroadcastAt = timestamp;
+      broadcastGameState();
+    }
+
+    gameAnimationFrame = window.requestAnimationFrame(tick);
+  };
+
+  gameAnimationFrame = window.requestAnimationFrame(tick);
+}
+
+function restartGameMatch() {
+  if (!gameState.active) {
+    return;
+  }
+
+  resetGameMatch();
+  renderGameState();
+
+  if (gameState.role === "host") {
+    startHostGameLoop();
+    safeSendGameMessage({
+      kind: "game-restart",
+      state: packGameState()
+    });
+  }
+}
+
+function endGame(options = {}) {
+  const { notifyPeer = false, message = "" } = options;
+
+  clearGameInviteTimeout();
+  window.cancelAnimationFrame(gameAnimationFrame);
+  gameAnimationFrame = 0;
+
+  if (notifyPeer && chatDataChannel?.readyState === "open") {
+    safeSendGameMessage({
+      kind: "game-end"
+    });
+  }
+
+  pendingGameInvite = false;
+  gameInvitePending = false;
+  gameState.active = false;
+  gameState.role = "idle";
+  gameState.roundOver = false;
+  gameState.localInput = 0;
+  gameState.remoteInput = 0;
+  gameKeys.up = false;
+  gameKeys.down = false;
+  gameLayer.classList.add("hidden");
+  gameInvite.classList.add("hidden");
+  gameResult.classList.add("hidden");
+  videoGrid.classList.remove("game-active", "game-guest");
+  applyVideoLayout();
+  setGameControlsState();
+
+  if (message) {
+    setRoomError(message);
+  }
+}
+
+function handleGameMessage(message) {
+  if (message.kind === "game-invite") {
+    if (gameState.active || gameInvitePending) {
+      safeSendGameMessage({
+        kind: "game-decline",
+        reason: "Peer is already in a game."
+      });
+      return;
+    }
+
+    pendingGameInvite = true;
+    gameInvite.classList.remove("hidden");
+    playNotificationSound("message");
+    setRoomError("Peer wants to start Ping-Pong.");
+    return;
+  }
+
+  if (message.kind === "game-accept") {
+    if (!gameInvitePending) {
+      return;
+    }
+
+    startGame("host");
+    broadcastGameState();
+    return;
+  }
+
+  if (message.kind === "game-decline") {
+    clearGameInviteTimeout();
+    gameInvitePending = false;
+    setRoomError(message.reason || "Peer declined the game.");
+    setGameControlsState();
+    return;
+  }
+
+  if (message.kind === "game-input") {
+    if (gameState.active && gameState.role === "host") {
+      gameState.remoteInput = clamp(Number(message.input || 0), -1, 1);
+    }
+    return;
+  }
+
+  if (message.kind === "game-state") {
+    if (!gameState.active) {
+      startGame("guest", { reset: false });
+    }
+
+    if (gameState.role === "guest") {
+      applyGameSnapshot(message.state || {});
+    }
+    return;
+  }
+
+  if (message.kind === "game-restart") {
+    if (!gameState.active) {
+      startGame("guest", { reset: false });
+    }
+
+    if (gameState.role === "guest") {
+      applyGameSnapshot(message.state || {});
+      setRoomError("Ping-Pong restarted.");
+    }
+    return;
+  }
+
+  if (message.kind === "game-rematch-request") {
+    if (gameState.active && gameState.role === "host" && gameState.roundOver) {
+      restartGameMatch();
+      setRoomError("Ping-Pong restarted.");
+    }
+    return;
+  }
+
+  if (message.kind === "game-end") {
+    endGame({
+      notifyPeer: false,
+      message: "Ping-Pong ended."
+    });
+  }
+}
+
+function updateLocalGameInput() {
+  if (!gameState.active) {
+    return;
+  }
+
+  const nextInput = (gameKeys.down ? 1 : 0) - (gameKeys.up ? 1 : 0);
+
+  if (nextInput === gameState.localInput) {
+    return;
+  }
+
+  gameState.localInput = nextInput;
+
+  if (gameState.role === "guest") {
+    safeSendGameMessage({
+      kind: "game-input",
+      input: nextInput
+    });
+  }
+}
+
+function shouldIgnoreGameKey(event) {
+  const target = event.target;
+  return target?.closest?.("input, textarea, select, button");
+}
+
+function handleGameKeyDown(event) {
+  if (!gameState.active || shouldIgnoreGameKey(event)) {
+    return;
+  }
+
+  if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
+    return;
+  }
+
+  event.preventDefault();
+  gameKeys.up = event.key === "ArrowUp" ? true : gameKeys.up;
+  gameKeys.down = event.key === "ArrowDown" ? true : gameKeys.down;
+  updateLocalGameInput();
+}
+
+function handleGameKeyUp(event) {
+  if (!gameState.active || shouldIgnoreGameKey(event)) {
+    return;
+  }
+
+  if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
+    return;
+  }
+
+  event.preventDefault();
+  gameKeys.up = event.key === "ArrowUp" ? false : gameKeys.up;
+  gameKeys.down = event.key === "ArrowDown" ? false : gameKeys.down;
+  updateLocalGameInput();
 }
 
 async function handleFileChannelMessage(event) {
@@ -1486,6 +2145,7 @@ async function handleIncomingFileMeta(message) {
     sha256: message.sha256 || ""
   };
 
+  playNotificationSound("file");
   createTransferItem(message.id, "Receiving", activeIncomingTransfer.name, size);
   updateTransferItem(message.id, 0, `0% of ${formatBytes(size)}`);
   sendFileControlMessage({
@@ -1523,6 +2183,7 @@ async function handleIncomingFileComplete(transferId) {
     sha256: activeIncomingTransfer.sha256
   });
 
+  setTransferFileLocation(transferId, finished.filePath || activeIncomingTransfer.filePath);
   updateTransferItem(transferId, activeIncomingTransfer.size, `Saved ${formatBytes(finished.received)}, verified`);
   sendFileControlMessage({
     kind: "file-saved",
@@ -2193,6 +2854,74 @@ closeQualityButton.addEventListener("click", () => {
   qualityPanel.classList.add("hidden");
 });
 
+startGameButton.addEventListener("click", () => {
+  primeNotificationAudio();
+
+  if (gameState.active) {
+    endGame({
+      notifyPeer: true,
+      message: "Ping-Pong ended."
+    });
+    return;
+  }
+
+  try {
+    sendGameInvite();
+  } catch (error) {
+    gameInvitePending = false;
+    setGameControlsState();
+    setRoomError(error.message || "Could not start game.");
+  }
+});
+
+confirmGameButton.addEventListener("click", () => {
+  if (!pendingGameInvite) {
+    return;
+  }
+
+  primeNotificationAudio();
+  safeSendGameMessage({
+    kind: "game-accept"
+  });
+  startGame("guest", { reset: false });
+});
+
+declineGameButton.addEventListener("click", () => {
+  if (pendingGameInvite) {
+    safeSendGameMessage({
+      kind: "game-decline",
+      reason: "Peer declined the game."
+    });
+  }
+
+  hideGameInvite();
+  setRoomError("");
+});
+
+gamePlayAgainButton.addEventListener("click", () => {
+  if (!gameState.active) {
+    return;
+  }
+
+  if (gameState.role === "host") {
+    restartGameMatch();
+    setRoomError("Ping-Pong restarted.");
+    return;
+  }
+
+  safeSendGameMessage({
+    kind: "game-rematch-request"
+  });
+  setRoomError("Rematch requested.");
+});
+
+gameEndButton.addEventListener("click", () => {
+  endGame({
+    notifyPeer: true,
+    message: "Ping-Pong ended."
+  });
+});
+
 cameraSelect.addEventListener("change", () => {
   switchCamera(cameraSelect.value).catch((error) => {
     setRoomError(error.message || "Could not switch camera.");
@@ -2221,6 +2950,10 @@ videoGrid.addEventListener("pointerup", finishPipDrag);
 videoGrid.addEventListener("pointercancel", cancelPipDrag);
 
 videoGrid.addEventListener("click", (event) => {
+  if (gameState.active) {
+    return;
+  }
+
   const tile = event.target.closest(".video-tile");
   if (!tile) {
     return;
@@ -2237,6 +2970,10 @@ videoGrid.addEventListener("click", (event) => {
 
 [localTile, remoteTile].forEach((tile) => {
   tile.addEventListener("keydown", (event) => {
+    if (gameState.active) {
+      return;
+    }
+
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       toggleVideoMain();
@@ -2333,6 +3070,11 @@ cameraButton.addEventListener("click", () => {
 leaveButton.addEventListener("click", () => {
   leaveCall(true);
 });
+
+window.addEventListener("keydown", handleGameKeyDown);
+window.addEventListener("keyup", handleGameKeyUp);
+window.addEventListener("pointerdown", primeNotificationAudio, { once: true });
+window.addEventListener("keydown", primeNotificationAudio, { once: true });
 
 window.addEventListener("beforeunload", () => {
   if (socket && socket.readyState === WebSocket.OPEN && currentRoomId) {

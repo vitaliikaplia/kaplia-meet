@@ -96,6 +96,16 @@ async function getConfiguredSaveDirectory() {
   return settings.saveDirectory;
 }
 
+function isPathInside(parentPath, childPath) {
+  const parent = path.resolve(parentPath);
+  const child = path.resolve(childPath);
+  const normalizedParent = process.platform === "win32" ? parent.toLowerCase() : parent;
+  const normalizedChild = process.platform === "win32" ? child.toLowerCase() : child;
+  const relative = path.relative(normalizedParent, normalizedChild);
+
+  return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
 function sanitizeFileName(fileName) {
   const cleaned = String(fileName || "received-file")
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
@@ -375,6 +385,27 @@ ipcMain.handle("files:chooseSendFile", async () => {
 });
 
 ipcMain.handle("files:describePath", async (_event, filePath) => describeSendFile(filePath));
+
+ipcMain.handle("files:showItemInFolder", async (_event, payload) => {
+  const filePath = String(payload?.filePath || "");
+  const saveDirectory = await getConfiguredSaveDirectory();
+
+  if (!filePath || !path.isAbsolute(filePath)) {
+    throw new Error("File path was not provided.");
+  }
+
+  if (!saveDirectory || !isPathInside(saveDirectory, filePath)) {
+    throw new Error("File is outside the configured save folder.");
+  }
+
+  if (fs.existsSync(filePath)) {
+    shell.showItemInFolder(filePath);
+    return { ok: true };
+  }
+
+  await shell.openPath(saveDirectory);
+  return { ok: true };
+});
 
 ipcMain.handle("files:readChunk", async (_event, payload) => {
   const filePath = payload?.path;

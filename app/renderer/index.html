@@ -84,6 +84,35 @@
               <strong>You are sharing your screen</strong>
               <button id="stop-screen-share-button" class="danger-button" type="button">Stop sharing</button>
             </div>
+
+            <div id="game-layer" class="game-layer hidden" aria-label="Ping-Pong game">
+              <div class="game-scoreboard">
+                <span id="game-left-score">0</span>
+                <span id="game-status">Ping-Pong</span>
+                <span id="game-right-score">0</span>
+              </div>
+              <div id="game-left-paddle" class="game-paddle game-paddle-left"></div>
+              <div id="game-right-paddle" class="game-paddle game-paddle-right"></div>
+              <div id="game-ball" class="game-ball"></div>
+              <div id="game-result" class="game-result hidden">
+                <strong id="game-result-title">Game over</strong>
+                <div class="game-result-actions">
+                  <button id="game-play-again-button" class="small-button" type="button">Play again</button>
+                  <button id="game-end-button" class="small-button" type="button">End game</button>
+                </div>
+              </div>
+            </div>
+
+            <div id="game-invite" class="game-invite hidden" role="dialog" aria-live="polite" aria-label="Confirm Starting Game">
+              <div>
+                <strong>Confirm Starting Game</strong>
+                <span>Peer wants to start Ping-Pong.</span>
+              </div>
+              <div class="game-invite-actions">
+                <button id="confirm-game-button" class="primary-button" type="button">Start game</button>
+                <button id="decline-game-button" class="small-button" type="button">Not now</button>
+              </div>
+            </div>
           </section>
 
           <aside id="chat-panel" class="chat-panel" aria-label="Meeting chat">
@@ -134,6 +163,7 @@
           <button id="screen-share-button" class="control-button" type="button">Share screen</button>
           <button id="devices-button" class="control-button" type="button">Devices</button>
           <button id="quality-button" class="control-button" type="button">Quality</button>
+          <button id="start-game-button" class="control-button" type="button" disabled>Start Game</button>
           <button id="leave-button" class="danger-button" type="button">Leave</button>
         </footer>
 
