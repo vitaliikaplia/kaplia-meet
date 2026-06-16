@@ -1,0 +1,10 @@
+{$MEET_DOMAIN} {
+  encode zstd gzip
+
+  reverse_proxy /health signaling:8080
+  reverse_proxy /ice-config signaling:8080
+  reverse_proxy /rooms signaling:8080
+  reverse_proxy /ws* signaling:8080
+
+  respond "Kaplia Meet signaling server" 200
+}

@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kaplia Meet</title>
+    <script type="module" src="/src/main.js"></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <section id="home-screen" class="screen home-screen">
+        <div class="home-panel">
+          <div class="brand-row">
+            <div class="brand-mark">K</div>
+            <div>
+              <h1>Kaplia Meet</h1>
+              <p>Private 1-on-1 WebRTC calls</p>
+            </div>
+          </div>
+
+          <label class="field-label" for="room-id-input">Room ID</label>
+          <input id="room-id-input" class="room-input" type="text" autocomplete="off" spellcheck="false" placeholder="ABCD-1234" />
+
+          <div class="button-row">
+            <button id="create-room-button" class="primary-button" type="button">Create room</button>
+            <button id="join-room-button" class="secondary-button" type="button">Join room</button>
+          </div>
+
+          <div class="home-save-row">
+            <div class="home-save-copy">
+              <span class="field-label">Save folder</span>
+              <span id="home-save-directory" class="file-path">Not configured</span>
+            </div>
+            <button id="home-choose-save-directory-button" class="small-button" type="button">Choose</button>
+          </div>
+
+          <div class="status-line">
+            <span id="signaling-dot" class="status-dot"></span>
+            <span id="signaling-status">Connecting to signaling server</span>
+          </div>
+          <p id="home-error" class="error-text" role="alert"></p>
+        </div>
+      </section>
+
+      <section id="room-screen" class="screen room-screen hidden">
+        <header class="room-header">
+          <div>
+            <p class="eyebrow">Room</p>
+            <div class="room-id-row">
+              <h2 id="room-title">-</h2>
+              <button id="copy-room-button" class="small-button" type="button">Copy ID</button>
+            </div>
+          </div>
+          <div class="room-header-actions">
+            <div class="call-status">
+              <span id="webrtc-dot" class="status-dot"></span>
+              <span id="webrtc-status">Idle</span>
+            </div>
+            <div class="quality-pill">
+              <span id="quality-status">Quality: waiting</span>
+            </div>
+            <div class="safety-pill">
+              <span>Safety code</span>
+              <strong id="safety-code">---</strong>
+            </div>
+          </div>
+        </header>
+
+        <div class="room-workspace">
+          <section id="video-grid" class="video-grid pip-bottom-right" aria-label="Video call">
+            <div id="remote-tile" class="video-tile remote-tile" role="button" tabindex="0" aria-label="Swap remote video">
+              <video id="remote-video" autoplay playsinline></video>
+              <div id="remote-placeholder" class="video-placeholder">Waiting for peer</div>
+              <span id="remote-tile-label" class="tile-label">Remote</span>
+            </div>
+
+            <div id="local-tile" class="video-tile local-tile" role="button" tabindex="0" aria-label="Swap local video">
+              <video id="local-video" autoplay muted playsinline></video>
+              <div id="local-placeholder" class="video-placeholder">Camera is off</div>
+              <span id="local-tile-label" class="tile-label">You</span>
+            </div>
+
+            <div id="screen-share-banner" class="screen-share-banner hidden">
+              <strong>You are sharing your screen</strong>
+              <button id="stop-screen-share-button" class="danger-button" type="button">Stop sharing</button>
+            </div>
+          </section>
+
+          <aside id="chat-panel" class="chat-panel" aria-label="Meeting chat">
+            <div class="chat-header">
+              <div>
+                <p class="eyebrow">Chat</p>
+                <h3>Messages</h3>
+              </div>
+              <div class="chat-header-actions">
+                <button id="clear-chat-button" class="small-button" type="button" disabled>Clear</button>
+              </div>
+            </div>
+
+            <div class="chat-save-row">
+              <div class="chat-save-copy">
+                <span class="field-label">Incoming files save to</span>
+                <span id="file-save-directory" class="file-path">-</span>
+              </div>
+              <button id="choose-save-directory-button" class="small-button" type="button">Folder</button>
+            </div>
+
+            <div id="chat-messages" class="chat-messages" aria-live="polite"></div>
+
+            <div id="file-drop-zone" class="file-drop-zone">Drop file to send</div>
+
+            <form id="chat-form" class="chat-compose">
+              <div class="chat-input-shell">
+                <button id="send-file-button" class="compose-icon-button" type="button" aria-label="Send file" title="Send file" disabled>
+                  <svg aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                  </svg>
+                </button>
+                <textarea id="chat-input" class="chat-input" rows="1" maxlength="8000" placeholder="Type a message"></textarea>
+                <button id="send-chat-button" class="compose-icon-button send-button" type="submit" aria-label="Send message" title="Send message" disabled>
+                  <svg aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="m22 2-7 20-4-9-9-4Z" />
+                    <path d="M22 2 11 13" />
+                  </svg>
+                </button>
+              </div>
+            </form>
+          </aside>
+        </div>
+
+        <footer class="controls-bar">
+          <button id="mute-button" class="control-button" type="button">Mute mic</button>
+          <button id="camera-button" class="control-button" type="button">Camera off</button>
+          <button id="screen-share-button" class="control-button" type="button">Share screen</button>
+          <button id="devices-button" class="control-button" type="button">Devices</button>
+          <button id="quality-button" class="control-button" type="button">Quality</button>
+          <button id="leave-button" class="danger-button" type="button">Leave</button>
+        </footer>
+
+        <section id="devices-panel" class="settings-panel hidden" aria-label="Device settings">
+          <div class="settings-panel-header">
+            <div>
+              <p class="eyebrow">Devices</p>
+              <h3>Audio and video</h3>
+            </div>
+            <button id="close-devices-button" class="small-button" type="button">Close</button>
+          </div>
+          <div class="settings-grid">
+            <label>
+              <span>Camera</span>
+              <select id="camera-select"></select>
+            </label>
+            <label>
+              <span>Microphone</span>
+              <select id="microphone-select"></select>
+            </label>
+            <label>
+              <span>Speaker</span>
+              <select id="speaker-select"></select>
+            </label>
+          </div>
+        </section>
+
+        <section id="quality-panel" class="settings-panel hidden" aria-label="Connection quality">
+          <div class="settings-panel-header">
+            <div>
+              <p class="eyebrow">Quality</p>
+              <h3>Connection details</h3>
+            </div>
+            <button id="close-quality-button" class="small-button" type="button">Close</button>
+          </div>
+          <div class="quality-grid">
+            <div><span>Route</span><strong id="quality-route">-</strong></div>
+            <div><span>Resolution</span><strong id="quality-resolution">-</strong></div>
+            <div><span>FPS</span><strong id="quality-fps">-</strong></div>
+            <div><span>Video bitrate</span><strong id="quality-video-bitrate">-</strong></div>
+            <div><span>Audio bitrate</span><strong id="quality-audio-bitrate">-</strong></div>
+            <div><span>Packet loss</span><strong id="quality-packet-loss">-</strong></div>
+            <div><span>RTT</span><strong id="quality-rtt">-</strong></div>
+          </div>
+        </section>
+
+        <section id="screen-picker" class="screen-picker hidden" aria-label="Choose screen">
+          <div class="screen-picker-panel">
+            <div class="settings-panel-header">
+              <div>
+                <p class="eyebrow">Screen share</p>
+                <h3>Choose a screen</h3>
+              </div>
+              <button id="cancel-screen-picker-button" class="small-button" type="button">Cancel</button>
+            </div>
+            <div id="screen-source-list" class="screen-source-list"></div>
+          </div>
+        </section>
+
+        <p id="room-error" class="error-text room-error" role="alert"></p>
+      </section>
+    </main>
+  </body>
+</html>

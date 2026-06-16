@@ -1,0 +1,60 @@
+{
+  "name": "kaplia-meet-app",
+  "version": "0.2.4",
+  "description": "Minimal Electron WebRTC P2P video calling app",
+  "main": "electron/main.js",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "build": "vite build",
+    "dist:mac": "npm run build && electron-builder --mac dmg --x64 --arm64",
+    "dist:win": "npm run build && electron-builder --win nsis portable --x64"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.3",
+    "cross-env": "^7.0.3",
+    "electron": "^42.4.0",
+    "electron-builder": "^26.15.2",
+    "vite": "^8.0.16",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "me.kaplia.meet",
+    "productName": "Kaplia Meet",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**/*",
+      "renderer-dist/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.video",
+      "target": [
+        "dmg"
+      ],
+      "extendInfo": {
+        "NSCameraUsageDescription": "Kaplia Meet needs camera access for video calls.",
+        "NSMicrophoneUsageDescription": "Kaplia Meet needs microphone access for audio calls."
+      }
+    },
+    "win": {
+      "signExecutable": false,
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "uninstallDisplayName": "Kaplia Meet",
+      "artifactName": "${productName}-${version}-${arch}-setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-${arch}-portable.${ext}"
+    }
+  }
+}
