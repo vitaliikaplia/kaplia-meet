@@ -1,6 +1,6 @@
 {
   "name": "kaplia-meet-app",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Minimal Electron WebRTC P2P video calling app",
   "main": "electron/main.js",
   "private": true,
@@ -31,6 +31,7 @@
     ],
     "mac": {
       "category": "public.app-category.video",
+      "icon": "build/icon.icns",
       "target": [
         "dmg"
       ],
@@ -40,6 +41,7 @@
       }
     },
     "win": {
+      "icon": "build/icon.ico",
       "signExecutable": false,
       "target": [
         "nsis",
